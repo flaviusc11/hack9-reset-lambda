@@ -6,10 +6,17 @@ import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBClient}
 import com.amazonaws.services.lambda.runtime.Context
 import io.github.mkotsur.aws.handler.Lambda._
 import io.github.mkotsur.aws.proxy.{ProxyRequest, ProxyResponse}
+import Helpers._
 
 import scala.collection.immutable.Seq
 
-class LambdaHandler extends Proxy[String, String] {
+sealed trait Response
+
+case object OK extends Response
+case class ErrorMessage(message: String) extends Response
+
+
+class LambdaHandler extends Proxy[String, Response] {
 
   private val tables = List("flavius-test2")
 
@@ -21,11 +28,11 @@ class LambdaHandler extends Proxy[String, String] {
       .builder()
       .build()
 
-  override def handle(request: ProxyRequest[String], context: Context) = {
+  override def handle(request: ProxyRequest[String], context: Context): Either[Throwable, ProxyResponse[Response]] = {
     val tableDescriptions = getTableDescriptions
     deleteTables(context)
     createTables(tableDescriptions, context)
-    Right(ProxyResponse(201))
+    Right(ProxyResponse(statusCode = 201, headers = Some(Map("Content-Type" -> "application/json"))))
   }
 
   private def getTableDescriptions: Seq[TableDescription] = {
