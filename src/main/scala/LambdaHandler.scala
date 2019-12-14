@@ -1,35 +1,29 @@
 import java.lang.System.lineSeparator
 import java.util
-import java.util.concurrent.{CompletableFuture, Future}
 
-import com.amazonaws.services.dynamodbv2.model.{CreateTableRequest, DeleteTableResult, GlobalSecondaryIndex, LocalSecondaryIndex, ProvisionedThroughput, TableDescription}
-import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBAsync, AmazonDynamoDBAsyncClient, AmazonDynamoDBClient}
+import com.amazonaws.services.dynamodbv2.model.{CreateTableRequest, GlobalSecondaryIndex, LocalSecondaryIndex, TableDescription}
+import com.amazonaws.services.dynamodbv2.{AmazonDynamoDB, AmazonDynamoDBClient}
 import com.amazonaws.services.lambda.runtime.Context
-import com.spikhalskiy.futurity.Futurity
 import io.github.mkotsur.aws.handler.Lambda._
 import io.github.mkotsur.aws.proxy.{ProxyRequest, ProxyResponse}
 
 import scala.collection.immutable.Seq
-import scala.compat.java8.FutureConverters
-import scala.util.{Failure, Success}
-import scala.concurrent.ExecutionContext.Implicits.global
 
 class LambdaHandler extends Proxy[String, String] {
 
-  private val tables = List("flavius-test")
+  private val tables = List("flavius-test2")
 
   private val _1: String = Option(System.getenv("AWS_ACCESS_KEY_ID")).getOrElse(throw new  Throwable("No AWS_ACCESS_KEY_ID defined!"))
   private val _2: String = Option(System.getenv("AWS_SECRET_KEY")).getOrElse(throw new  Throwable("No AWS_SECRET_KEY defined!"))
 
-  val client: AmazonDynamoDBAsync =
-    AmazonDynamoDBAsyncClient
-      .asyncBuilder()
+  val client: AmazonDynamoDB =
+    AmazonDynamoDBClient
+      .builder()
       .build()
 
   override def handle(request: ProxyRequest[String], context: Context) = {
     val tableDescriptions = getTableDescriptions
     deleteTables(context)
-    //Thread.sleep(2000)
     createTables(tableDescriptions, context)
     Right(ProxyResponse(201))
   }
@@ -43,14 +37,15 @@ class LambdaHandler extends Proxy[String, String] {
     }
   }
 
-
-
-  private def deleteTables(context: Context) = {
+  private def deleteTables(context: Context): Unit = {
     try {
-      context.getLogger.log(s"Deleting tables $tables"+ lineSeparator())
-      val scalaFutures = tables.map(client.deleteTableAsync)
-        .map(f => FutureConverters.toScala(Futurity.shift(f)))
-      waitAll(scalaFutures)
+      context.getLogger.log(s"Initiate the process of deleting tables $tables"+ lineSeparator())
+      tables.map(client.deleteTable)
+
+      while(getTableDescriptions.nonEmpty) {
+        context.getLogger.log("Still waiting to delete some tables..."+lineSeparator())
+        Thread.sleep(200)
+      }
       context.getLogger.log(s"All tables were deleted with success"+lineSeparator())
     } catch {
       case t: Throwable =>
@@ -58,33 +53,27 @@ class LambdaHandler extends Proxy[String, String] {
     }
   }
 
-  private def waitAll[T](futures: Seq[concurrent.Future[T]]) =
-    concurrent.Future.sequence(lift(futures))
-
-  private def lift[T](futures: Seq[concurrent.Future[T]]) =
-    futures.map(_.map { Success(_) }.recover { case t => Failure(t) })
-
-  //case class TableDesc(tableName: String, readCapacity: Long, writeCapacity: Long)
+  case class TableDesc(tableName: String, readCapacity: Long, writeCapacity: Long)
 
   private def createTables(tableDescriptions: Seq[TableDescription], context: Context) = {
     try {
       context.getLogger.log(lineSeparator())
       context.getLogger.log(s"Creating tables $tableDescriptions"+lineSeparator()+lineSeparator())
-     val res = tableDescriptions
+
+      tableDescriptions
         .map { td =>
           context.getLogger.log(s"$td"+lineSeparator())
-
-          new CreateTableRequest()
-            .withTableName(td.getTableName)
-            .withProvisionedThroughput(new ProvisionedThroughput(4L, 4L))
+          new CreateTableRequest(td.getTableName, td.getKeySchema)
             .withAttributeDefinitions(td.getAttributeDefinitions)
-            .withKeySchema(td.getKeySchema)
+            .withBillingMode("PAY_PER_REQUEST")
             .withLocalSecondaryIndexes(td.getLocalSecondaryIndexes.asInstanceOf[util.Collection[LocalSecondaryIndex]])
             .withGlobalSecondaryIndexes(td.getGlobalSecondaryIndexes.asInstanceOf[util.Collection[GlobalSecondaryIndex]])
-        }.map(client.createTableAsync)
-        .map(f => FutureConverters.toScala(Futurity.shift(f)))
+        }.map(client.createTable)
 
-      waitAll(res)
+      while(getTableDescriptions.size < tables.size) {
+        context.getLogger.log("Still waiting to create some tables..."+lineSeparator())
+        Thread.sleep(200)
+      }
       context.getLogger.log("All tables were created with success"+lineSeparator())
     } catch {
       case t: Throwable =>
