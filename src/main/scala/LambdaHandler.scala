@@ -32,7 +32,7 @@ class LambdaHandler extends Proxy[String, Response] {
     val tableDescriptions = getTableDescriptions
     deleteTables(context)
     createTables(tableDescriptions, context)
-    Right(ProxyResponse(statusCode = 201, headers = Some(Map("Content-Type" -> "application/json"))))
+    Right(ProxyResponse(statusCode = 201, headers = Some(Map("Content-Type" -> "application/json")), body = Some(OK)))
   }
 
   private def getTableDescriptions: Seq[TableDescription] = {
